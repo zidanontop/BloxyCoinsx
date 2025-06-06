@@ -7,7 +7,7 @@ const jwt = require("jsonwebtoken");
 const dotenv = require("dotenv");
 const crypto = require("crypto");
 const randomWords = require("random-words");
-const { JWT_SECRET } = require("../../config");
+const { JWT_SECRET, JWT_CONFIG } = require("../../config");
 let userStore = {};
 dotenv.config();
 
@@ -45,6 +45,31 @@ async function fetchRobloxUserData(userId) {
   }
 }
 
+// Function to generate JWT token
+const generateToken = (userData) => {
+  return jwt.sign(
+    {
+      id: userData._id,
+      robloxId: userData.robloxId,
+      username: userData.username,
+      iat: Math.floor(Date.now() / 1000)
+    },
+    JWT_SECRET,
+    JWT_CONFIG
+  );
+};
+
+// Function to verify JWT token
+const verifyToken = async (token) => {
+  try {
+    const decoded = await jwt.verify(token, JWT_SECRET);
+    return decoded;
+  } catch (error) {
+    console.error('Token verification failed:', error.message);
+    throw error;
+  }
+};
+
 exports.authenticateToken = asyncHandler(async (req, res, next) => {
   try {
     const authHeader = req.headers["authorization"];
@@ -64,17 +89,8 @@ exports.authenticateToken = asyncHandler(async (req, res, next) => {
     }
 
     try {
-      const decoded = await new Promise((resolve, reject) => {
-        jwt.verify(token, JWT_SECRET, (err, decoded) => {
-          if (err) {
-            console.error("JWT verification error:", err);
-            reject(err);
-          } else {
-            resolve(decoded);
-          }
-        });
-      });
-
+      const decoded = await verifyToken(token);
+      
       // Verify user exists in database
       const user = await Account.findById(decoded.id);
       if (!user) {
@@ -97,10 +113,13 @@ exports.authenticateToken = asyncHandler(async (req, res, next) => {
           message: "Token expired"
         });
       }
-      return res.status(403).json({
-        success: false,
-        message: "Invalid token"
-      });
+      if (err.name === 'JsonWebTokenError') {
+        return res.status(403).json({
+          success: false,
+          message: "Invalid token"
+        });
+      }
+      throw err;
     }
   } catch (error) {
     console.error("Token verification error:", error);
@@ -224,15 +243,12 @@ exports.connect_roblox = [
                 }
               );
 
-              const token = jwt.sign(
-                { 
-                  id: accountData._id,
-                  robloxId: userId,
-                  username: userData.username
-                }, 
-                JWT_SECRET,
-                { expiresIn: '7d' }
-              );
+              // Use the new generateToken function
+              const token = generateToken({
+                _id: accountData._id,
+                robloxId: userId,
+                username: userData.username
+              });
               
               return res.json({ token });
             } else {
