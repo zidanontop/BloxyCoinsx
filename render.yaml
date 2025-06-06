@@ -7,5 +7,13 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      - key: PORT
+        value: 6565
+      - key: JWT_SECRET
+        sync: false
+      - key: MONGODB_URI
+        sync: false
+      - key: XP_CONSTANT
+        value: "1"
     healthCheckPath: /api/health
     autoDeploy: true 
