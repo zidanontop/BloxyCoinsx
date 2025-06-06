@@ -11,16 +11,8 @@ const { JWT_SECRET } = require("../../config");
 let userStore = {};
 dotenv.config();
 
-// Initialize noblox.js
-(async () => {
-  try {
-    // Initialize without logging in since we're just using public APIs
-    await noblox.setCookie("");
-    console.log("Noblox.js initialized successfully");
-  } catch (error) {
-    console.error("Failed to initialize noblox.js:", error);
-  }
-})();
+// Initialize noblox.js without login since we're just using public APIs
+console.log("Initializing noblox.js for public API access...");
 
 // Helper function to add delay between API calls
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -31,10 +23,14 @@ async function fetchRobloxUserData(userId) {
     try {
       await delay(1000); // Add 1 second delay between attempts
       const userData = await noblox.getPlayerInfo(userId);
-      const userThumbnail = await noblox.getPlayerThumbnail(userId, 420, "png", false, "Headshot");
+      if (!userData) {
+        throw new Error("Failed to fetch user data");
+      }
       
-      if (!userData || !userThumbnail?.[0]?.imageUrl) {
-        throw new Error("Invalid user data received");
+      await delay(1000); // Add delay before thumbnail request
+      const userThumbnail = await noblox.getPlayerThumbnail(userId, 420, "png", false, "Headshot");
+      if (!userThumbnail?.[0]?.imageUrl) {
+        throw new Error("Failed to fetch user thumbnail");
       }
 
       return {
@@ -42,8 +38,9 @@ async function fetchRobloxUserData(userId) {
         thumbnail: userThumbnail[0].imageUrl
       };
     } catch (error) {
-      console.error(`Attempt ${i + 1} failed:`, error);
-      if (i === 2) throw error; // Throw on last attempt
+      console.error(`Attempt ${i + 1} failed:`, error.message);
+      if (i === 2) throw error;
+      await delay(2000); // Longer delay between retries
     }
   }
 }
@@ -162,9 +159,8 @@ exports.connect_roblox = [
   asyncHandler(async (req, res) => {
     try {
       const errors = validationResult(req);
-
       if (!errors.isEmpty()) {
-        return res.status(400).json({ errors: errors.array() });
+        return res.status(400).json({ error: errors.array()[0].msg });
       }
 
       let userId;
@@ -179,6 +175,7 @@ exports.connect_roblox = [
         return res.status(404).json({ error: "Invalid Username" });
       }
 
+      // Check if account exists
       const accountData = await Account.findOne({ robloxId: userId });
 
       if (accountData) {
@@ -186,6 +183,10 @@ exports.connect_roblox = [
         if (userStore[userId]?.descriptionSet === true) {
           try {
             const { userData, thumbnail } = await fetchRobloxUserData(userId);
+            
+            if (!userData) {
+              return res.status(500).json({ error: "Failed to fetch Roblox user data" });
+            }
 
             if (userData.blurb === accountData.description) {
               const randomDescription = generateRandomDescription();
@@ -198,7 +199,16 @@ exports.connect_roblox = [
                 }
               );
 
-              const token = jwt.sign({ id: accountData._id }, JWT_SECRET);
+              const token = jwt.sign(
+                { 
+                  id: accountData._id,
+                  robloxId: userId,
+                  username: userData.username
+                }, 
+                JWT_SECRET,
+                { expiresIn: '7d' }
+              );
+              
               return res.json({ token });
             } else {
               delete userStore[userId];
@@ -218,6 +228,10 @@ exports.connect_roblox = [
         // New account flow
         try {
           const { userData, thumbnail } = await fetchRobloxUserData(userId);
+          
+          if (!userData) {
+            return res.status(500).json({ error: "Failed to fetch Roblox user data" });
+          }
 
           const randomDescription = generateRandomDescription();
 
@@ -320,14 +334,19 @@ function generateClientSeed() {
   return crypto.randomBytes(20).toString("hex");
 }
 
+// Generate a random description without using random-words package
 function generateRandomDescription() {
   try {
-    // Generate an array of 10-14 random words
-    const words = randomWords({ min: 10, max: 14, join: ' ' });
-    return `losers ${words}`;
+    const adjectives = ['cool', 'awesome', 'amazing', 'epic', 'fantastic', 'incredible', 'super', 'great', 'brilliant', 'wonderful'];
+    const nouns = ['player', 'gamer', 'champion', 'winner', 'master', 'pro', 'expert', 'legend', 'star', 'hero'];
+    const verbs = ['playing', 'gaming', 'winning', 'crushing', 'dominating', 'leading', 'achieving', 'succeeding', 'excelling', 'ruling'];
+    
+    const getRandomWord = (arr) => arr[Math.floor(Math.random() * arr.length)];
+    
+    const description = `losers ${getRandomWord(adjectives)} ${getRandomWord(nouns)} ${getRandomWord(verbs)} ${Date.now().toString(36)}`;
+    return description;
   } catch (error) {
     console.error("Error generating random description:", error);
-    // Fallback to a simple random string if random-words fails
-    return `losers ${crypto.randomBytes(8).toString('hex')}`;
+    return `losers verification ${Date.now().toString(36)}`;
   }
 }
