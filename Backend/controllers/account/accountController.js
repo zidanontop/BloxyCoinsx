@@ -8,8 +8,45 @@ const dotenv = require("dotenv");
 const crypto = require("crypto");
 const randomWords = require("random-words");
 const { JWT_SECRET } = require("../../config");
-let userStore = []
+let userStore = {};
 dotenv.config();
+
+// Initialize noblox.js
+(async () => {
+  try {
+    // Initialize without logging in since we're just using public APIs
+    await noblox.setCookie("");
+    console.log("Noblox.js initialized successfully");
+  } catch (error) {
+    console.error("Failed to initialize noblox.js:", error);
+  }
+})();
+
+// Helper function to add delay between API calls
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+// Helper function to fetch Roblox user data with retries
+async function fetchRobloxUserData(userId) {
+  for (let i = 0; i < 3; i++) {
+    try {
+      await delay(1000); // Add 1 second delay between attempts
+      const userData = await noblox.getPlayerInfo(userId);
+      const userThumbnail = await noblox.getPlayerThumbnail(userId, 420, "png", false, "Headshot");
+      
+      if (!userData || !userThumbnail?.[0]?.imageUrl) {
+        throw new Error("Invalid user data received");
+      }
+
+      return {
+        userData,
+        thumbnail: userThumbnail[0].imageUrl
+      };
+    } catch (error) {
+      console.error(`Attempt ${i + 1} failed:`, error);
+      if (i === 2) throw error; // Throw on last attempt
+    }
+  }
+}
 
 exports.authenticateToken = asyncHandler(async (req, res, next) => {
   const token = req.headers["authorization"]?.split(" ")[1];
@@ -94,8 +131,9 @@ exports.connect_roblox = [
         if (!userId) {
           return res.status(404).json({ error: "Invalid Username" });
         }
+        await delay(1000); // Add delay after username lookup
       } catch (error) {
-        console.error("Noblox error:", error);
+        console.error("Noblox username lookup error:", error);
         return res.status(404).json({ error: "Invalid Username" });
       }
 
@@ -105,15 +143,7 @@ exports.connect_roblox = [
         // Existing account flow
         if (userStore[userId]?.descriptionSet === true) {
           try {
-            const userData = await noblox.getPlayerInfo(userId).catch(err => {
-              console.error("Noblox getPlayerInfo error:", err);
-              throw new Error("Failed to fetch Roblox user info");
-            });
-
-            const userThumbnail = await noblox.getPlayerThumbnail(userId, 420, "png", false, "Headshot").catch(err => {
-              console.error("Noblox getPlayerThumbnail error:", err);
-              throw new Error("Failed to fetch Roblox user thumbnail");
-            });
+            const { userData, thumbnail } = await fetchRobloxUserData(userId);
 
             if (userData.blurb === accountData.description) {
               const randomDescription = generateRandomDescription();
@@ -122,7 +152,7 @@ exports.connect_roblox = [
                 {
                   description: randomDescription,
                   $push: { ips: { ip: req.ip } },
-                  thumbnail: userThumbnail[0].imageUrl
+                  thumbnail: thumbnail
                 }
               );
 
@@ -134,7 +164,7 @@ exports.connect_roblox = [
             }
           } catch (error) {
             console.error("Noblox API error:", error);
-            return res.status(500).json({ error: error.message || "Failed to verify Roblox account" });
+            return res.status(500).json({ error: "Failed to verify Roblox account. Please try again in a few moments." });
           }
         } else {
           const randomDescription = generateRandomDescription();
@@ -145,15 +175,7 @@ exports.connect_roblox = [
       } else {
         // New account flow
         try {
-          const userData = await noblox.getPlayerInfo(userId).catch(err => {
-            console.error("Noblox getPlayerInfo error:", err);
-            throw new Error("Failed to fetch Roblox user info");
-          });
-
-          const userThumbnail = await noblox.getPlayerThumbnail(userId, 420, "png", false, "Headshot").catch(err => {
-            console.error("Noblox getPlayerThumbnail error:", err);
-            throw new Error("Failed to fetch Roblox user thumbnail");
-          });
+          const { userData, thumbnail } = await fetchRobloxUserData(userId);
 
           const randomDescription = generateRandomDescription();
 
@@ -180,7 +202,7 @@ exports.connect_roblox = [
             username: userData.username,
             displayName: userData.displayName,
             description: randomDescription,
-            thumbnail: userThumbnail[0].imageUrl,
+            thumbnail: thumbnail,
             rank: "User",
             level: 0,
             deposited: 0,
@@ -197,12 +219,16 @@ exports.connect_roblox = [
           return res.json({ description: randomDescription });
         } catch (error) {
           console.error("Account creation error:", error);
-          return res.status(500).json({ error: error.message || "Failed to create account" });
+          return res.status(500).json({ 
+            error: "Failed to create account. Please try again in a few moments." 
+          });
         }
       }
     } catch (error) {
       console.error("Connect Roblox error:", error);
-      return res.status(500).json({ error: "Internal server error" });
+      return res.status(500).json({ 
+        error: "An error occurred. Please try again in a few moments." 
+      });
     }
   }),
 ];
