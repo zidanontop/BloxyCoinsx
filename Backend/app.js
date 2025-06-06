@@ -50,7 +50,15 @@ async function main() {
 app.set("trust proxy", 1);
 app.use(helmet());
 app.use(compression());
-app.use(cors());
+app.use(cors({
+  origin: [
+    'https://mm-2-betters-x-6ktvg.vercel.app',
+    'http://localhost:3000'
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
 
 app.use(
   bodyParser.json({
