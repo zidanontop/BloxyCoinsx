@@ -1,7 +1,7 @@
 const asyncHandler = require("express-async-handler");
 const { validationResult, body } = require("express-validator");
 const Account = require("../../models/account");
-const noblox = require("noblox.js");
+const axios = require("axios");
 const InventoryItem = require("../../models/inventoryItem");
 const jwt = require("jsonwebtoken");
 const dotenv = require("dotenv");
@@ -11,31 +11,104 @@ const { JWT_SECRET, JWT_CONFIG } = require("../../config");
 let userStore = {};
 dotenv.config();
 
+// Roblox API endpoints
+const ROBLOX_API = {
+  USERS_ENDPOINT: 'https://users.roblox.com/v1/usernames/users',
+  USER_DETAILS_ENDPOINT: 'https://users.roblox.com/v1/users/',
+  THUMBNAILS_ENDPOINT: 'https://thumbnails.roblox.com/v1/users/avatar-headshot',
+  REQUEST_TIMEOUT: 10000
+};
+
 // Initialize noblox.js without login since we're just using public APIs
 console.log("Initializing noblox.js for public API access...");
 
 // Helper function to add delay between API calls
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
+// Helper function to validate Roblox username and get user info
+async function validateRobloxUser(username) {
+  try {
+    // Get user ID from username
+    const userResponse = await axios.post(ROBLOX_API.USERS_ENDPOINT, {
+      usernames: [username],
+      excludeBannedUsers: false
+    }, {
+      timeout: ROBLOX_API.REQUEST_TIMEOUT,
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (!userResponse.data.data.length) {
+      throw new Error("Invalid Username");
+    }
+
+    const userId = userResponse.data.data[0].id;
+    await delay(1000); // Add delay between API calls
+
+    // Get user details
+    const [detailsResponse, thumbnailResponse] = await Promise.all([
+      axios.get(`${ROBLOX_API.USER_DETAILS_ENDPOINT}${userId}`, {
+        timeout: ROBLOX_API.REQUEST_TIMEOUT,
+        headers: {
+          'Accept': 'application/json'
+        }
+      }),
+      axios.get(`${ROBLOX_API.THUMBNAILS_ENDPOINT}?userIds=${userId}&size=420x420&format=png`, {
+        timeout: ROBLOX_API.REQUEST_TIMEOUT,
+        headers: {
+          'Accept': 'application/json'
+        }
+      })
+    ]);
+
+    return {
+      userId,
+      userData: {
+        username: detailsResponse.data.name,
+        displayName: detailsResponse.data.displayName,
+        blurb: detailsResponse.data.description
+      },
+      thumbnail: thumbnailResponse.data.data[0].imageUrl
+    };
+  } catch (error) {
+    console.error("Roblox validation error:", error.message);
+    if (error.response) {
+      console.error("Response status:", error.response.status);
+      console.error("Response data:", error.response.data);
+    }
+    throw new Error(error.message || "Failed to validate Roblox user");
+  }
+}
+
 // Helper function to fetch Roblox user data with retries
 async function fetchRobloxUserData(userId) {
   for (let i = 0; i < 3; i++) {
     try {
-      await delay(1000); // Add 1 second delay between attempts
-      const userData = await noblox.getPlayerInfo(userId);
-      if (!userData) {
+      // Get user info
+      const userData = await axios.get(`${ROBLOX_API.USER_DETAILS_ENDPOINT}${userId}`, {
+        timeout: ROBLOX_API.REQUEST_TIMEOUT,
+        headers: { 'Accept': 'application/json' }
+      });
+      if (!userData.data) {
         throw new Error("Failed to fetch user data");
       }
       
       await delay(1000); // Add delay before thumbnail request
-      const userThumbnail = await noblox.getPlayerThumbnail(userId, 420, "png", false, "Headshot");
-      if (!userThumbnail?.[0]?.imageUrl) {
+      
+      // Get user thumbnail
+      const thumbnailData = await axios.get(`${ROBLOX_API.THUMBNAILS_ENDPOINT}?userIds=${userId}&size=420x420&format=png`, {
+        timeout: ROBLOX_API.REQUEST_TIMEOUT,
+        headers: { 'Accept': 'application/json' }
+      });
+      if (!thumbnailData.data.data[0].imageUrl) {
         throw new Error("Failed to fetch user thumbnail");
       }
 
       return {
-        userData,
-        thumbnail: userThumbnail[0].imageUrl
+        userData: userData.data,
+        thumbnail: thumbnailData.data.data[0].imageUrl
       };
     } catch (error) {
       console.error(`Attempt ${i + 1} failed:`, error.message);
@@ -105,7 +178,7 @@ exports.authenticateToken = asyncHandler(async (req, res, next) => {
         robloxId: decoded.robloxId,
         username: decoded.username
       };
-      next();
+    next();
     } catch (err) {
       if (err.name === 'TokenExpiredError') {
         return res.status(401).json({
@@ -207,17 +280,15 @@ exports.connect_roblox = [
         return res.status(400).json({ error: errors.array()[0].msg });
       }
 
-      let userId;
+      // Validate Roblox user
+      let validatedUser;
       try {
-        userId = await noblox.getIdFromUsername(req.body.username);
-        if (!userId) {
-          return res.status(404).json({ error: "Invalid Username" });
-        }
-        await delay(1000); // Add delay after username lookup
+        validatedUser = await validateRobloxUser(req.body.username);
       } catch (error) {
-        console.error("Noblox username lookup error:", error);
-        return res.status(404).json({ error: "Invalid Username" });
+        return res.status(404).json({ error: error.message });
       }
+
+      const { userId, userData, thumbnail } = validatedUser;
 
       // Check if account exists
       const accountData = await Account.findOne({ robloxId: userId });
@@ -226,13 +297,13 @@ exports.connect_roblox = [
         // Existing account flow
         if (userStore[userId]?.descriptionSet === true) {
           try {
-            const { userData, thumbnail } = await fetchRobloxUserData(userId);
-            
-            if (!userData) {
-              return res.status(500).json({ error: "Failed to fetch Roblox user data" });
-            }
+            // Verify description matches
+            const userDetails = await axios.get(`${ROBLOX_API.USER_DETAILS_ENDPOINT}${userId}`, {
+              timeout: ROBLOX_API.REQUEST_TIMEOUT,
+              headers: { 'Accept': 'application/json' }
+            });
 
-            if (userData.blurb === accountData.description) {
+            if (userDetails.data.description === accountData.description) {
               const randomDescription = generateRandomDescription();
               await Account.updateOne(
                 { robloxId: userId },
@@ -243,7 +314,6 @@ exports.connect_roblox = [
                 }
               );
 
-              // Use the new generateToken function
               const token = generateToken({
                 _id: accountData._id,
                 robloxId: userId,
@@ -256,7 +326,7 @@ exports.connect_roblox = [
               return res.status(400).json({ error: "Description does not match" });
             }
           } catch (error) {
-            console.error("Noblox API error:", error);
+            console.error("Roblox API error:", error);
             return res.status(500).json({ error: "Failed to verify Roblox account. Please try again in a few moments." });
           }
         } else {
@@ -268,12 +338,6 @@ exports.connect_roblox = [
       } else {
         // New account flow
         try {
-          const { userData, thumbnail } = await fetchRobloxUserData(userId);
-          
-          if (!userData) {
-            return res.status(500).json({ error: "Failed to fetch Roblox user data" });
-          }
-
           const randomDescription = generateRandomDescription();
 
           // Handle referrer
@@ -375,7 +439,7 @@ function generateClientSeed() {
   return crypto.randomBytes(20).toString("hex");
 }
 
-// Generate a random description without using random-words package
+// Generate a random description
 function generateRandomDescription() {
   try {
     const adjectives = ['cool', 'awesome', 'amazing', 'epic', 'fantastic', 'incredible', 'super', 'great', 'brilliant', 'wonderful'];
