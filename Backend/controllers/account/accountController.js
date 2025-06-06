@@ -118,7 +118,7 @@ async function fetchRobloxUserData(userId) {
   }
 }
 
-// Function to generate JWT token
+// Function to generate JWT token with consistent payload structure
 const generateToken = (userData) => {
   return jwt.sign(
     {
@@ -128,17 +128,14 @@ const generateToken = (userData) => {
       iat: Math.floor(Date.now() / 1000)
     },
     JWT_SECRET,
-    {
-      expiresIn: '7d',
-      algorithm: 'HS256'
-    }
+    JWT_CONFIG // Using the standardized config with issuer and audience
   );
 };
 
 // Function to verify JWT token
 const verifyToken = async (token) => {
   try {
-    const decoded = await jwt.verify(token, JWT_SECRET);
+    const decoded = await jwt.verify(token, JWT_SECRET, JWT_CONFIG);
     return decoded;
   } catch (error) {
     console.error('Token verification failed:', error.message);
@@ -168,7 +165,10 @@ exports.authenticateToken = asyncHandler(async (req, res, next) => {
       const decoded = await verifyToken(token);
       
       // Verify user exists in database
-      const user = await Account.findById(decoded.id);
+      const user = await Account.findById(decoded.id)
+        .select('_id robloxId username')
+        .lean();
+        
       if (!user) {
         return res.status(403).json({
           success: false,
@@ -176,12 +176,21 @@ exports.authenticateToken = asyncHandler(async (req, res, next) => {
         });
       }
 
+      // Attach user info to request
       req.user = {
-        id: decoded.id,
-        robloxId: decoded.robloxId,
-        username: decoded.username
+        id: user._id,
+        robloxId: user.robloxId,
+        username: user.username
       };
-    next();
+
+      // Generate a fresh token if the current one is nearing expiration
+      const tokenAge = Math.floor(Date.now() / 1000) - decoded.iat;
+      if (tokenAge > 5 * 24 * 60 * 60) { // If token is older than 5 days
+        const newToken = generateToken(user);
+        res.setHeader('X-New-Token', newToken);
+      }
+
+      next();
     } catch (err) {
       if (err.name === 'TokenExpiredError') {
         return res.status(401).json({

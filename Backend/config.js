@@ -1,9 +1,21 @@
 /** @format */
 
-require('dotenv').config();
+const dotenv = require('dotenv');
+const crypto = require('crypto');
 
-// Use a more secure default secret if environment variable is not set
-const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(64).toString('hex');
+dotenv.config();
+
+// Generate a stable secret based on the environment or use a fixed backup
+const generateStableSecret = () => {
+  if (process.env.JWT_SECRET) return process.env.JWT_SECRET;
+  
+  // If no environment variable, generate a stable secret based on the day
+  // This ensures the secret stays the same during the same day even if server restarts
+  const date = new Date().toISOString().split('T')[0];
+  return crypto.createHash('sha256').update(date + 'BLOXPVP_STABLE_KEY').digest('hex');
+};
+
+const JWT_SECRET = generateStableSecret();
 const PORT = process.env.PORT || 3000;
 const HCAPTCHA_SECRET = process.env.HCAPTCHA_SECRET || "0x0000000000000000000000000000000000000000";
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://addddd:addddd@cluster0.sc5dux9.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0';
@@ -13,7 +25,9 @@ const XP_CONSTANT = process.env.XP_CONSTANT || 0.04;
 // JWT Configuration
 const JWT_CONFIG = {
   expiresIn: '7d',
-  algorithm: 'HS256'
+  algorithm: 'HS256',
+  issuer: 'BLOXPVP',
+  audience: 'BLOXPVP_USERS'
 };
 
 module.exports = {
