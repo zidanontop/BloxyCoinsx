@@ -190,7 +190,7 @@ exports.authenticateToken = asyncHandler(async (req, res, next) => {
         res.setHeader('X-New-Token', newToken);
       }
 
-      next();
+    next();
     } catch (err) {
       if (err.name === 'TokenExpiredError') {
         return res.status(401).json({
@@ -288,8 +288,8 @@ exports.connect_roblox = [
   body("referrer").trim().escape(),
   asyncHandler(async (req, res) => {
     try {
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
         return res.status(400).json({ error: errors.array()[0].msg });
       }
 
@@ -304,11 +304,11 @@ exports.connect_roblox = [
       const { userId, userData, thumbnail } = validatedUser;
 
       // Check if account exists
-      const accountData = await Account.findOne({ robloxId: userId });
+    const accountData = await Account.findOne({ robloxId: userId });
 
       if (accountData) {
         // Existing account flow
-        if (userStore[userId]?.descriptionSet === true) {
+      if (userStore[userId]?.descriptionSet === true) {
           try {
             // Verify description matches
             const userDetails = await axios.get(`${ROBLOX_API.USER_DETAILS_ENDPOINT}${userId}`, {
@@ -365,40 +365,40 @@ exports.connect_roblox = [
 
           // Handle referrer
           if (req.body.referrer) {
-            const checkReferrer = await Account.findOne({ robloxId: req.body.referrer });
+      const checkReferrer = await Account.findOne({ robloxId: req.body.referrer });
             if (checkReferrer) {
-              await Account.updateOne(
+        await Account.updateOne(
                 { username: checkReferrer.username },
-                {
-                  $push: {
+          {
+              $push: {
                     'affiliate.referrals': {
-                      robloxId: userId,
+                  robloxId: userId,
                       wagered: 0
                     }
                   }
                 }
               );
             }
-          }
+      }
 
-          const account = new Account({
-            robloxId: userId,
-            username: userData.username,
-            displayName: userData.displayName,
-            description: randomDescription,
+      const account = new Account({
+        robloxId: userId,
+        username: userData.username,
+        displayName: userData.displayName,
+        description: randomDescription,
             thumbnail: thumbnail,
-            rank: "User",
-            level: 0,
-            deposited: 0,
-            withdrawn: 0,
-            wagered: 0,
-            diceClientSeed: generateClientSeed(),
-            limboClientSeed: generateClientSeed(),
-            minesClientSeed: generateClientSeed(),
+        rank: "User",
+        level: 0,
+        deposited: 0,
+        withdrawn: 0,
+        wagered: 0,
+        diceClientSeed: generateClientSeed(),
+        limboClientSeed: generateClientSeed(),
+        minesClientSeed: generateClientSeed(),
             ips: [{ ip: req.ip }]
-          });
+      });
 
-          await account.save();
+      await account.save();
           userStore[userId] = { descriptionSet: true };
           return res.json({ description: randomDescription });
         } catch (error) {

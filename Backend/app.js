@@ -47,18 +47,42 @@ async function main() {
   console.log("MongoDB connected successfully");
 }
 
+// CORS Configuration
+const ALLOWED_ORIGINS = [
+  'https://mm-2-betters-x-6ktvg.vercel.app',
+  'https://bloxpvp.vercel.app',
+  'http://localhost:3000'
+];
+
 app.set("trust proxy", 1);
 app.use(helmet());
 app.use(compression());
+
+// Updated CORS configuration
 app.use(cors({
-  origin: [
-    'https://mm-2-betters-x-6ktvg.vercel.app',
-    'http://localhost:3000'
-  ],
+  origin: function(origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    if (ALLOWED_ORIGINS.indexOf(origin) === -1) {
+      console.log('Origin not allowed:', origin);
+      return callback(null, false);
+    }
+    return callback(null, true);
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  exposedHeaders: ['X-New-Token'] // Allow frontend to see the new token header
 }));
+
+// Add security headers
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  next();
+});
 
 app.use(
   bodyParser.json({
