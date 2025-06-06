@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: bloxpvp-backend
+    env: node
+    buildCommand: cd Backend && npm install
+    startCommand: cd Backend && node app.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+    healthCheckPath: /api/health
+    autoDeploy: true 
