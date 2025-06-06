@@ -430,21 +430,19 @@ async function getJackpot() {
 }
 
 async function startupCheckUnfinished() {
-  let currentJackpot = await Jackpot.find({}).sort({ $natural: -1 });
-  currentJackpot = currentJackpot[0];
+  try {
+    let currentJackpot = await Jackpot.find({}).sort({ $natural: -1 });
+    currentJackpot = currentJackpot[0];
 
-  if (currentJackpot.state != "Ended") {
-    if (currentJackpot.endsAt > new Date()) {
-      close_jackpot();
-      play_jackpot();
-      setTimeout(async () => {
-        await Jackpot.findByIdAndUpdate(currentJackpot._id, {
-          inactive: true,
-        });
-        create_jackpot();
-      }, 18000);
-    } else if (currentJackpot.state == "Started") {
-      setTimeout(async () => {
+    // If no jackpot exists, create a new one
+    if (!currentJackpot) {
+      console.log("No existing jackpot found, creating new one...");
+      return create_jackpot();
+    }
+
+    // Handle existing jackpot based on its state
+    if (currentJackpot.state !== "Ended") {
+      if (currentJackpot.endsAt > new Date()) {
         close_jackpot();
         play_jackpot();
         setTimeout(async () => {
@@ -453,23 +451,32 @@ async function startupCheckUnfinished() {
           });
           create_jackpot();
         }, 18000);
-      }, currentJackpot.endsAt.getTime() - new Date().getTime());
-    }
-  } else if (
-    currentJackpot.state == "Ended" &&
-    currentJackpot.inactive == false
-  ) {
-    play_jackpot();
-    setTimeout(async () => {
-      await Jackpot.findByIdAndUpdate(currentJackpot._id, {
-        inactive: true,
-      });
+      } else if (currentJackpot.state === "Started") {
+        setTimeout(async () => {
+          close_jackpot();
+          play_jackpot();
+          setTimeout(async () => {
+            await Jackpot.findByIdAndUpdate(currentJackpot._id, {
+              inactive: true,
+            });
+            create_jackpot();
+          }, 18000);
+        }, currentJackpot.endsAt.getTime() - new Date().getTime());
+      }
+    } else if (currentJackpot.state === "Ended" && !currentJackpot.inactive) {
+      play_jackpot();
+      setTimeout(async () => {
+        await Jackpot.findByIdAndUpdate(currentJackpot._id, {
+          inactive: true,
+        });
+        create_jackpot();
+      }, 18000);
+    } else if (currentJackpot.state === "Ended" && currentJackpot.inactive) {
       create_jackpot();
-    }, 18000);
-  } else if (
-    currentJackpot.state == "Ended" &&
-    currentJackpot.inactive == true
-  ) {
+    }
+  } catch (error) {
+    console.error("Error in startupCheckUnfinished:", error);
+    // Create a new jackpot if there's an error
     create_jackpot();
   }
 }
