@@ -128,7 +128,10 @@ const generateToken = (userData) => {
       iat: Math.floor(Date.now() / 1000)
     },
     JWT_SECRET,
-    JWT_CONFIG
+    {
+      expiresIn: '7d',
+      algorithm: 'HS256'
+    }
   );
 };
 
@@ -212,12 +215,9 @@ exports.auto_login = asyncHandler(async (req, res) => {
       });
     }
 
-    const userData = await Account.findById(req.user.id, {
-      ips: 0,
-      __v: 0,
-      password: 0,
-      withdrawalWalletAddresses: 0
-    });
+    const userData = await Account.findById(req.user.id)
+      .select('-ips -__v -password -withdrawalWalletAddresses')
+      .lean();
 
     if (!userData) {
       return res.status(404).json({
@@ -226,9 +226,13 @@ exports.auto_login = asyncHandler(async (req, res) => {
       });
     }
 
+    // Generate a fresh token
+    const token = generateToken(userData);
+
     res.status(200).json({
       success: true,
-      data: userData
+      data: userData,
+      token
     });
   } catch (error) {
     console.error("Error in auto_login:", error);
@@ -310,7 +314,8 @@ exports.connect_roblox = [
                 {
                   description: randomDescription,
                   $push: { ips: { ip: req.ip } },
-                  thumbnail: thumbnail
+                  thumbnail: thumbnail,
+                  lastLogin: new Date()
                 }
               );
 
@@ -320,7 +325,16 @@ exports.connect_roblox = [
                 username: userData.username
               });
               
-              return res.json({ token });
+              return res.json({
+                success: true,
+                token,
+                user: {
+                  id: accountData._id,
+                  robloxId: userId,
+                  username: userData.username,
+                  thumbnail: thumbnail
+                }
+              });
             } else {
               delete userStore[userId];
               return res.status(400).json({ error: "Description does not match" });
