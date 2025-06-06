@@ -7,7 +7,7 @@ const jwt = require("jsonwebtoken");
 const dotenv = require("dotenv");
 const crypto = require("crypto");
 const randomWords = require("random-words");
-const { JWT_SECRET, JWT_CONFIG } = require("../../config");
+const { JWT_SECRET, JWT_CONFIG, API_SECRET, TOKEN_CONFIG, generateToken, hashToken } = require("../../config");
 let userStore = {};
 dotenv.config();
 
@@ -118,31 +118,35 @@ async function fetchRobloxUserData(userId) {
   }
 }
 
-// Function to generate JWT token with consistent payload structure
-const generateToken = (userData) => {
-  return jwt.sign(
-    {
-      id: userData._id,
-      robloxId: userData.robloxId,
-      username: userData.username,
-      iat: Math.floor(Date.now() / 1000)
-    },
-    JWT_SECRET,
-    JWT_CONFIG // Using the standardized config with issuer and audience
-  );
-};
+// Store active tokens with their expiry (in memory for now, could move to Redis later)
+const activeTokens = new Map();
 
-// Function to verify JWT token
-const verifyToken = async (token) => {
-  try {
-    const decoded = await jwt.verify(token, JWT_SECRET, JWT_CONFIG);
-    return decoded;
-  } catch (error) {
-    console.error('Token verification failed:', error.message);
-    throw error;
+// Clean up expired tokens periodically
+setInterval(() => {
+  const now = Date.now();
+  for (const [token, data] of activeTokens.entries()) {
+    if (data.expiresAt < now) {
+      activeTokens.delete(token);
+    }
   }
+}, 60 * 60 * 1000); // Clean up every hour
+
+// Function to create a new auth token
+const createAuthToken = (userData) => {
+  const token = generateToken();
+  const hashedToken = hashToken(token);
+  
+  activeTokens.set(hashedToken, {
+    userId: userData._id,
+    robloxId: userData.robloxId,
+    username: userData.username,
+    expiresAt: Date.now() + TOKEN_CONFIG.expiresIn
+  });
+
+  return token;
 };
 
+// Middleware to authenticate token
 exports.authenticateToken = asyncHandler(async (req, res, next) => {
   try {
     const authHeader = req.headers["authorization"];
@@ -161,51 +165,53 @@ exports.authenticateToken = asyncHandler(async (req, res, next) => {
       });
     }
 
-    try {
-      const decoded = await verifyToken(token);
+    // Hash the provided token
+    const hashedToken = hashToken(token);
+    const tokenData = activeTokens.get(hashedToken);
+
+    if (!tokenData) {
+      return res.status(403).json({
+        success: false,
+        message: "Invalid or expired token"
+      });
+    }
+
+    if (tokenData.expiresAt < Date.now()) {
+      activeTokens.delete(hashedToken);
+      return res.status(401).json({
+        success: false,
+        message: "Token expired"
+      });
+    }
+
+    // Verify user still exists in database
+    const user = await Account.findById(tokenData.userId)
+      .select('_id robloxId username')
+      .lean();
       
-      // Verify user exists in database
-      const user = await Account.findById(decoded.id)
-        .select('_id robloxId username')
-        .lean();
-        
-      if (!user) {
-        return res.status(403).json({
-          success: false,
-          message: "User not found"
-        });
-      }
+    if (!user) {
+      activeTokens.delete(hashedToken);
+      return res.status(403).json({
+        success: false,
+        message: "User not found"
+      });
+    }
 
-      // Attach user info to request
-      req.user = {
-        id: user._id,
-        robloxId: user.robloxId,
-        username: user.username
-      };
+    // Attach user info to request
+    req.user = {
+      id: user._id,
+      robloxId: user.robloxId,
+      username: user.username
+    };
 
-      // Generate a fresh token if the current one is nearing expiration
-      const tokenAge = Math.floor(Date.now() / 1000) - decoded.iat;
-      if (tokenAge > 5 * 24 * 60 * 60) { // If token is older than 5 days
-        const newToken = generateToken(user);
-        res.setHeader('X-New-Token', newToken);
-      }
+    // Refresh token if it's close to expiring
+    const timeToExpiry = tokenData.expiresAt - Date.now();
+    if (timeToExpiry < 2 * 24 * 60 * 60 * 1000) { // Less than 2 days left
+      const newToken = createAuthToken(user);
+      res.setHeader('X-New-Token', newToken);
+    }
 
     next();
-    } catch (err) {
-      if (err.name === 'TokenExpiredError') {
-        return res.status(401).json({
-          success: false,
-          message: "Token expired"
-        });
-      }
-      if (err.name === 'JsonWebTokenError') {
-        return res.status(403).json({
-          success: false,
-          message: "Invalid token"
-        });
-      }
-      throw err;
-    }
   } catch (error) {
     console.error("Token verification error:", error);
     return res.status(500).json({
@@ -236,7 +242,7 @@ exports.auto_login = asyncHandler(async (req, res) => {
     }
 
     // Generate a fresh token
-    const token = generateToken(userData);
+    const token = createAuthToken(userData);
 
     res.status(200).json({
       success: true,
@@ -328,7 +334,7 @@ exports.connect_roblox = [
                 }
               );
 
-              const token = generateToken({
+              const token = createAuthToken({
                 _id: accountData._id,
                 robloxId: userId,
                 username: userData.username
