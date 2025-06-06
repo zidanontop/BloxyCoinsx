@@ -198,8 +198,8 @@ exports.auto_login = asyncHandler(async (req, res) => {
       data: userData
     });
   } catch (error) {
-    console.error("Error in auto_login:", error);
-    res.status(500).json({
+    console.error("Auto login error:", error);
+    return res.status(500).json({
       success: false,
       message: "Internal server error"
     });
@@ -233,9 +233,11 @@ exports.load_inventory = asyncHandler(async (req, res) => {
   }
 });
 
+// Connect Roblox account
 exports.connect_roblox = asyncHandler(async (req, res) => {
   try {
     const { username } = req.body;
+
     if (!username) {
       return res.status(400).json({
         success: false,
@@ -243,88 +245,54 @@ exports.connect_roblox = asyncHandler(async (req, res) => {
       });
     }
 
-    // Get user ID from username
-    const userResponse = await axios.post(ROBLOX_API.USERS_ENDPOINT, {
-      usernames: [username],
-      excludeBannedUsers: false
-    }, {
-      timeout: ROBLOX_API.REQUEST_TIMEOUT,
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json'
+    // Validate and get Roblox user data
+    const robloxData = await validateRobloxUser(username);
+    
+    // Generate a random description for verification
+    const description = `BLOXPVP-${crypto.randomBytes(8).toString('hex')}`;
+
+    // Create or update account
+    const account = await Account.findOneAndUpdate(
+      { robloxId: robloxData.userId },
+      {
+        username: robloxData.userData.username,
+        displayName: robloxData.userData.displayName,
+        robloxId: robloxData.userId,
+        avatar: robloxData.thumbnail,
+        description: description,
+        lastLogin: new Date(),
+        $setOnInsert: {
+          balance: 0,
+          totalWagered: 0,
+          totalDeposited: 0,
+          totalWithdrawn: 0,
+          createdAt: new Date()
+        }
+      },
+      { 
+        upsert: true, 
+        new: true,
+        setDefaultsOnInsert: true 
+      }
+    );
+
+    // Set session data
+    req.session.userId = account._id;
+    req.session.robloxId = account.robloxId;
+    req.session.username = account.username;
+
+    res.status(200).json({
+      success: true,
+      data: {
+        account,
+        description
       }
     });
-
-    if (!userResponse.data.data.length) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid Username"
-      });
-    }
-
-    const userId = userResponse.data.data[0].id;
-    await delay(1000); // Add delay between API calls
-
-    // Get user details and thumbnail
-    const [detailsResponse, thumbnailResponse] = await Promise.all([
-      axios.get(`${ROBLOX_API.USER_DETAILS_ENDPOINT}${userId}`, {
-        timeout: ROBLOX_API.REQUEST_TIMEOUT,
-        headers: { 'Accept': 'application/json' }
-      }),
-      axios.get(`${ROBLOX_API.THUMBNAILS_ENDPOINT}?userIds=${userId}&size=420x420&format=png`, {
-        timeout: ROBLOX_API.REQUEST_TIMEOUT,
-        headers: { 'Accept': 'application/json' }
-      })
-    ]);
-
-    // Check if account already exists
-    const existingAccount = await Account.findOne({ robloxId: userId });
-    
-    if (existingAccount) {
-      // Update session with user data
-      req.session.userId = existingAccount._id;
-      req.session.robloxId = userId;
-      req.session.username = username;
-      
-      return res.status(200).json({
-        success: true,
-        data: {
-          id: existingAccount._id,
-          robloxId: userId,
-          username: username,
-          thumbnail: thumbnailResponse.data.data[0].imageUrl
-        }
-      });
-    } else {
-      // Create new account
-      const newAccount = new Account({
-        robloxId: userId,
-        username: username,
-        thumbnail: thumbnailResponse.data.data[0].imageUrl
-      });
-      
-      await newAccount.save();
-      
-      // Set session data
-      req.session.userId = newAccount._id;
-      req.session.robloxId = userId;
-      req.session.username = username;
-      
-      return res.status(200).json({
-        success: true,
-        data: {
-          id: newAccount._id,
-          robloxId: userId,
-          username: username,
-          thumbnail: thumbnailResponse.data.data[0].imageUrl
-        }
-      });
-    }
   } catch (error) {
     console.error("Connect Roblox error:", error);
     return res.status(500).json({
       success: false,
-      message: "Failed to connect Roblox account"
+      message: error.message || "Failed to connect Roblox account"
     });
   }
 });

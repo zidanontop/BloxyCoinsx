@@ -30,7 +30,7 @@ router.post("/mines/create-game", accountController.authenticateToken, minesCont
 //router.post("/register", queueMw, accountController.register);
 //router.post("/login", accountController.login);
 router.post("/connect-roblox", accountController.connect_roblox);
-router.get("/login-auto", accountController.authenticateToken, accountController.auto_login);
+router.get("/login-auto", accountController.authenticateSession, accountController.auto_login);
 router.get("/user/inventory", accountController.authenticateToken, roblox_auth_check, accountController.load_inventory);
 router.post("/profile", accountController.get_profile);
 
