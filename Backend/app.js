@@ -6,6 +6,8 @@ const cookieParser = require("cookie-parser");
 const logger = require("morgan");
 const mongoose = require("mongoose");
 const cors = require("cors");
+const session = require('express-session');
+const MongoStore = require('connect-mongo');
 const { rateLimit } = require("express-rate-limit");
 const Account = require("./models/account");
 const helmet = require("helmet");
@@ -35,133 +37,48 @@ initSocket(socketServer);
 mongoose.set("strictQuery", false);
 
 // MongoDB Connection
-const mongoDB = process.env.MONGODB_URI;
 console.log("Attempting MongoDB connection...");
 
 main().catch((err) => console.log("MongoDB connection error:", err));
 async function main() {
-  await mongoose.connect(mongoDB, {
+  await mongoose.connect(MONGODB_URI, {
     useNewUrlParser: true,
     useUnifiedTopology: true
   });
   console.log("MongoDB connected successfully");
 }
 
-// CORS Configuration
-const ALLOWED_ORIGINS = [
-  'https://mm-2-betters-x-6ktvg.vercel.app',
-  'https://bloxpvp.vercel.app',
-  'http://localhost:3000'
-];
+// Session configuration
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'bloxpvp_session_secret',
+  resave: false,
+  saveUninitialized: false,
+  store: MongoStore.create({
+    mongoUrl: MONGODB_URI,
+    ttl: 7 * 24 * 60 * 60, // 7 days
+    autoRemove: 'native'
+  }),
+  cookie: {
+    secure: process.env.NODE_ENV === 'production',
+    httpOnly: true,
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
+  }
+}));
 
 app.set("trust proxy", 1);
 app.use(helmet());
 app.use(compression());
 
-// Updated CORS configuration
+// CORS configuration with credentials
 app.use(cors({
-  origin: function(origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
-    
-    if (ALLOWED_ORIGINS.indexOf(origin) === -1) {
-      console.log('Origin not allowed:', origin);
-      return callback(null, false);
-    }
-    return callback(null, true);
-  },
+  origin: process.env.NODE_ENV === 'production' 
+    ? ['https://mm-2-betters-x-6ktvg.vercel.app']
+    : ['http://localhost:3000'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-  exposedHeaders: ['X-New-Token'] // Allow frontend to see the new token header
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
-
-// Add security headers
-app.use((req, res, next) => {
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-Frame-Options', 'DENY');
-  res.setHeader('X-XSS-Protection', '1; mode=block');
-  next();
-});
-
-app.use(
-  bodyParser.json({
-    verify: (req, res, buf) => (req.rawBody = buf),
-  })
-);
-
-app.post("/withdraw/callback", [
-  body("status").escape().trim(),
-  body("price").escape().trim(),
-  body("currency").escape().trim(),
-  body("trackId").escape().trim(),
-  body("address").escape().trim(),
-  rateLimit({
-    limit: 15,
-    windowMs: 2 * 60 * 1000,
-    legacyHeaders: false,
-  }),
-  async (req, res) => {
-    const hmacReceived = req.headers["hmac"];
-    const rawBody = req.rawBody.toString();
-    const calculatedHmac = crypto
-      .createHmac("sha512", process.env.PAYOUT_API_KEY)
-      .update(rawBody)
-      .digest("hex");
-
-    if (hmacReceived == null || hmacReceived != calculatedHmac) {
-      console.error("Invalid HMAC signature", hmacReceived, calculatedHmac);
-      return res.status(400).send("Invalid HMAC signature");
-    }
-
-    const notification = JSON.parse(rawBody);
-
-    if (notification.status === "Complete") {
-      try {
-        const account = await Account.findOne({
-          withdrawalWalletAddresses: notification.address,
-        });
-        if (!account) {
-          console.error(
-            "No account found for this withdrawal address:",
-            notification.address
-          );
-          return res.status(404).send("Account not found");
-        }
-
-        console.log("Withdrawal processed for account:", account._id);
-        withdrawCryptoHook.send(
-          `${notification?.currency} withdrawal processed (User: ${
-            account.username
-          } - ${account.robloxId}) (Amount: $${
-            Math.round(Number(notification.price) * 100) / 100
-          })`
-        );
-        res.status(200).send("Withdrawal processed successfully");
-      } catch (error) {
-        console.error("Error processing withdrawal:", error);
-        res.status(500).json({
-          success: false,
-          message: "An error occurred while processing the withdrawal.",
-        });
-      }
-    } else {
-      console.log(
-        `Withdrawal status ${notification.status} for transaction:`,
-        notification.trackId
-      );
-      res.status(200).send("OK");
-    }
-  },
-]);
-
-// Health check endpoint for Render
-app.get('/api/health', (req, res) => {
-  res.status(200).json({ status: 'healthy' });
-});
-
-app.set("views", path.join(__dirname, "views"));
-app.set("view engine", "jade");
 
 app.use(logger("short"));
 app.use(express.json());
@@ -188,7 +105,7 @@ app.use(function (err, req, res, next) {
 });
 
 socketServer.listen(6565, () => {
-  console.log("Socket is running on port 6565");
+  console.log("Server is running on port 6565");
 });
 
 function emitEvent(eventName, data) {
