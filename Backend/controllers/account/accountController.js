@@ -105,8 +105,15 @@ exports.connect_roblox = [
         // Existing account flow
         if (userStore[userId]?.descriptionSet === true) {
           try {
-            const userData = await noblox.getPlayerInfo(userId);
-            const userThumbnail = await noblox.getPlayerThumbnail(userId, 420, "png", false, "Headshot");
+            const userData = await noblox.getPlayerInfo(userId).catch(err => {
+              console.error("Noblox getPlayerInfo error:", err);
+              throw new Error("Failed to fetch Roblox user info");
+            });
+
+            const userThumbnail = await noblox.getPlayerThumbnail(userId, 420, "png", false, "Headshot").catch(err => {
+              console.error("Noblox getPlayerThumbnail error:", err);
+              throw new Error("Failed to fetch Roblox user thumbnail");
+            });
 
             if (userData.blurb === accountData.description) {
               const randomDescription = generateRandomDescription();
@@ -127,7 +134,7 @@ exports.connect_roblox = [
             }
           } catch (error) {
             console.error("Noblox API error:", error);
-            return res.status(500).json({ error: "Failed to verify Roblox account" });
+            return res.status(500).json({ error: error.message || "Failed to verify Roblox account" });
           }
         } else {
           const randomDescription = generateRandomDescription();
@@ -138,8 +145,16 @@ exports.connect_roblox = [
       } else {
         // New account flow
         try {
-          const userData = await noblox.getPlayerInfo(userId);
-          const userThumbnail = await noblox.getPlayerThumbnail(userId, 420, "png", false, "Headshot");
+          const userData = await noblox.getPlayerInfo(userId).catch(err => {
+            console.error("Noblox getPlayerInfo error:", err);
+            throw new Error("Failed to fetch Roblox user info");
+          });
+
+          const userThumbnail = await noblox.getPlayerThumbnail(userId, 420, "png", false, "Headshot").catch(err => {
+            console.error("Noblox getPlayerThumbnail error:", err);
+            throw new Error("Failed to fetch Roblox user thumbnail");
+          });
+
           const randomDescription = generateRandomDescription();
 
           // Handle referrer
@@ -182,7 +197,7 @@ exports.connect_roblox = [
           return res.json({ description: randomDescription });
         } catch (error) {
           console.error("Account creation error:", error);
-          return res.status(500).json({ error: "Failed to create account" });
+          return res.status(500).json({ error: error.message || "Failed to create account" });
         }
       }
     } catch (error) {
@@ -238,13 +253,13 @@ function generateClientSeed() {
 }
 
 function generateRandomDescription() {
-  const phrase = ["losers"];
-  const numWords = Math.floor(Math.random() * 4) + 10;
-
-  for (let i = 0; i < numWords; i++) {
-    const randomWord = randomWords(); 
-    phrase.push(randomWord);
+  try {
+    // Generate an array of 10-14 random words
+    const words = randomWords({ min: 10, max: 14, join: ' ' });
+    return `losers ${words}`;
+  } catch (error) {
+    console.error("Error generating random description:", error);
+    // Fallback to a simple random string if random-words fails
+    return `losers ${crypto.randomBytes(8).toString('hex')}`;
   }
-
-  return phrase.join(" ");
 }
