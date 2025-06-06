@@ -49,22 +49,53 @@ async function fetchRobloxUserData(userId) {
 }
 
 exports.authenticateToken = asyncHandler(async (req, res, next) => {
-  const token = req.headers["authorization"]?.split(" ")[1];
+  try {
+    const authHeader = req.headers["authorization"];
+    const token = authHeader && authHeader.split(" ")[1];
 
-  if (!token) return res.sendStatus(401);
-
-  jwt.verify(token, JWT_SECRET, (err, user) => {
-    if (err) {
-      console.error("Error verifying token:", err);
-      return res.status(403).json({
+    if (!token) {
+      return res.status(401).json({
         success: false,
-        message: "Unauthorized",
+        message: "No token provided"
       });
     }
 
-    req.user = user;
-    next();
-  });
+    jwt.verify(token, JWT_SECRET, async (err, decoded) => {
+      if (err) {
+        console.error("Error verifying token:", err);
+        return res.status(403).json({
+          success: false,
+          message: "Invalid or expired token"
+        });
+      }
+
+      try {
+        // Verify user exists in database
+        const user = await Account.findById(decoded.id);
+        if (!user) {
+          return res.status(403).json({
+            success: false,
+            message: "User not found"
+          });
+        }
+
+        req.user = decoded;
+        next();
+      } catch (dbError) {
+        console.error("Database error during token verification:", dbError);
+        return res.status(500).json({
+          success: false,
+          message: "Internal server error"
+        });
+      }
+    });
+  } catch (error) {
+    console.error("Token verification error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error"
+    });
+  }
 });
 
 exports.auto_login = asyncHandler(async (req, res) => {
@@ -73,12 +104,23 @@ exports.auto_login = asyncHandler(async (req, res) => {
       { _id: req.user.id },
       { ips: 0, _id: 0, __v: 0, password: 0, withdrawalWalletAddresses: 0 }
     );
-    res.status(200).send(userData);
+
+    if (!userData) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found"
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: userData
+    });
   } catch (error) {
-    console.error("Error retrieving user data:", error);
+    console.error("Error in auto_login:", error);
     res.status(500).json({
       success: false,
-      message: "Internal Server Error",
+      message: "Internal server error"
     });
   }
 });
