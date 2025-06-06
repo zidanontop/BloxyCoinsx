@@ -1,6 +1,8 @@
 /** @format */
 
-const JWT_SECRET = 'fwnqifnwquiohi421nkmcwqkcmwqkfwqkl';
+require('dotenv').config();
+
+const JWT_SECRET = process.env.JWT_SECRET || 'bloxpvp-secure-jwt-secret-key';
 const PORT = process.env.PORT || 3000;
 const HCAPTCHA_SECRET =
   process.env.HCAPTCHA_SECRET || "0x0000000000000000000000000000000000000000";

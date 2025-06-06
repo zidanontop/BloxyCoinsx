@@ -48,8 +48,14 @@ async function fetchRobloxUserData(userId) {
 exports.authenticateToken = asyncHandler(async (req, res, next) => {
   try {
     const authHeader = req.headers["authorization"];
-    const token = authHeader && authHeader.split(" ")[1];
+    if (!authHeader?.startsWith('Bearer ')) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid authorization header format"
+      });
+    }
 
+    const token = authHeader.split(" ")[1];
     if (!token) {
       return res.status(401).json({
         success: false,
@@ -57,35 +63,45 @@ exports.authenticateToken = asyncHandler(async (req, res, next) => {
       });
     }
 
-    jwt.verify(token, JWT_SECRET, async (err, decoded) => {
-      if (err) {
-        console.error("Error verifying token:", err);
+    try {
+      const decoded = await new Promise((resolve, reject) => {
+        jwt.verify(token, JWT_SECRET, (err, decoded) => {
+          if (err) {
+            console.error("JWT verification error:", err);
+            reject(err);
+          } else {
+            resolve(decoded);
+          }
+        });
+      });
+
+      // Verify user exists in database
+      const user = await Account.findById(decoded.id);
+      if (!user) {
         return res.status(403).json({
           success: false,
-          message: "Invalid or expired token"
+          message: "User not found"
         });
       }
 
-      try {
-        // Verify user exists in database
-        const user = await Account.findById(decoded.id);
-        if (!user) {
-          return res.status(403).json({
-            success: false,
-            message: "User not found"
-          });
-        }
-
-        req.user = decoded;
-        next();
-      } catch (dbError) {
-        console.error("Database error during token verification:", dbError);
-        return res.status(500).json({
+      req.user = {
+        id: decoded.id,
+        robloxId: decoded.robloxId,
+        username: decoded.username
+      };
+      next();
+    } catch (err) {
+      if (err.name === 'TokenExpiredError') {
+        return res.status(401).json({
           success: false,
-          message: "Internal server error"
+          message: "Token expired"
         });
       }
-    });
+      return res.status(403).json({
+        success: false,
+        message: "Invalid token"
+      });
+    }
   } catch (error) {
     console.error("Token verification error:", error);
     return res.status(500).json({
@@ -97,10 +113,19 @@ exports.authenticateToken = asyncHandler(async (req, res, next) => {
 
 exports.auto_login = asyncHandler(async (req, res) => {
   try {
-    const userData = await Account.findOne(
-      { _id: req.user.id },
-      { ips: 0, _id: 0, __v: 0, password: 0, withdrawalWalletAddresses: 0 }
-    );
+    if (!req.user?.id) {
+      return res.status(401).json({
+        success: false,
+        message: "Not authenticated"
+      });
+    }
+
+    const userData = await Account.findById(req.user.id, {
+      ips: 0,
+      __v: 0,
+      password: 0,
+      withdrawalWalletAddresses: 0
+    });
 
     if (!userData) {
       return res.status(404).json({
