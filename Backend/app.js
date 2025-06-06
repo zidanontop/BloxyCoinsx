@@ -32,15 +32,19 @@ const app = express();
 const socketServer = http.createServer(app);
 initSocket(socketServer);
 
-mongoose.set("strictQuery", "false");
-// const dev_db = "mongodb+srv://admin:admin@cluster.9atdqpo.mongodb.net/?retryWrites=true&w=majority&appName=cluster";
-const dev_db =
-  "mongodb+srv://johnson:jingleton@cluster0.ce4xwfb.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0";
-const mongoDB = MONGODB_URI || dev_db;
+mongoose.set("strictQuery", false);
 
-main().catch((err) => console.log(err));
+// MongoDB Connection
+const mongoDB = process.env.MONGODB_URI;
+console.log("Attempting MongoDB connection...");
+
+main().catch((err) => console.log("MongoDB connection error:", err));
 async function main() {
-  mongoose.connect(mongoDB);
+  await mongoose.connect(mongoDB, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true
+  });
+  console.log("MongoDB connected successfully");
 }
 
 app.set("trust proxy", 1);
