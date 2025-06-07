@@ -28,7 +28,7 @@ exports.handleMinesCreateGame = [
       }
 
       const { betAmount, mineCount } = req.query;
-      const userId = req.user.id;
+      const userId = req.user._id;
 
       let user = await Account.findById(userId).session(session);
 
