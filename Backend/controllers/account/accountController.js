@@ -236,12 +236,45 @@ exports.load_inventory = asyncHandler(async (req, res) => {
 // Connect Roblox account
 exports.connect_roblox = asyncHandler(async (req, res) => {
   try {
-    const { username } = req.body;
+    const { username, checkOnly } = req.body;
 
+    // If this is just a check and we have a session, return the account
+    if (checkOnly && req.session.userId) {
+      const account = await Account.findById(req.session.userId)
+        .select('-ips -__v -password -withdrawalWalletAddresses')
+        .lean();
+      
+      if (account) {
+        return res.status(200).json({
+          success: true,
+          data: { account }
+        });
+      }
+      return res.status(401).json({
+        success: false,
+        message: "No account found"
+      });
+    }
+
+    // Regular connect flow
     if (!username) {
       return res.status(400).json({
         success: false,
         message: "Username is required"
+      });
+    }
+
+    // Check if account already exists for this username
+    const existingAccount = await Account.findOne({ username })
+      .select('-ips -__v -password -withdrawalWalletAddresses')
+      .lean();
+
+    if (existingAccount) {
+      // Update session
+      req.session.userId = existingAccount._id;
+      return res.status(200).json({
+        success: true,
+        data: { account: existingAccount }
       });
     }
 
@@ -278,13 +311,10 @@ exports.connect_roblox = asyncHandler(async (req, res) => {
 
     // Set session data
     req.session.userId = account._id;
-    req.session.robloxId = account.robloxId;
-    req.session.username = account.username;
 
     res.status(200).json({
       success: true,
       data: {
-        account,
         description
       }
     });
