@@ -59,10 +59,11 @@ app.use(session({
     autoRemove: 'native'
   }),
   cookie: {
-    secure: process.env.NODE_ENV === 'production',
+    secure: true, // Always use secure in production
     httpOnly: true,
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
+    sameSite: 'none',
+    domain: process.env.NODE_ENV === 'production' ? 'bloxycoinsx.onrender.com' : undefined
   }
 }));
 
@@ -72,12 +73,11 @@ app.use(compression());
 
 // CORS configuration with credentials
 app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
-    ? ['https://mm-2-betters-x-6ktvg.vercel.app']
-    : ['http://localhost:3000'],
+  origin: ['https://mm-2-betters-x-6ktvg.vercel.app'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
+  exposedHeaders: ['Set-Cookie']
 }));
 
 app.use(logger("short"));
