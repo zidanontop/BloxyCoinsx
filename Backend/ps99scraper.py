@@ -4,7 +4,7 @@ from pymongo import MongoClient
 from time import sleep
 import os
 
-database_url = os.environ.get("MONGODB_URI", "mongodb+srv://johnson:jingleton@cluster0.ce4xwfb.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0")
+database_url = os.environ.get("mongodb+srv://zmansour479:zmansour479@ps99coins.ro13cb2.mongodb.net/?retryWrites=true&w=majority&appName=PS99Coins")
 
 scraper = cloudscraper.create_scraper(
     browser={
