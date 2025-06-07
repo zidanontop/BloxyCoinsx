@@ -21,7 +21,7 @@ const minesController = require('../controllers/games/minesController');
 //wss://323e38b2-4f53-42ed-a232-ad2bc264e8c2-00-3c2u3risany1k.picard.replit.dev/socket.io/?EIO=4&transport=websocket
 // { "event": "minesClick", "row": 1, "tile": 2 }
 
-router.post("/mines/create-game", accountController.authenticateSession, minesController.handleMinesCreateGame);
+router.post("/mines/create-game", accountController.authenticateToken, roblox_auth_check, minesController.handleMinesCreateGame);
 
 
 
